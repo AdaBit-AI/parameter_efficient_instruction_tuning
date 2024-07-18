@@ -54,6 +54,31 @@ def remove_extra_brace(file_path):
     with open(file_path, "w") as f:
         f.write(content)
 
+
+def rename_index(df, rename_vars):
+    def extract_numbers(label):
+        return [int(num) for num in re.findall(r'-?\d+', label)]
+    def add_math_context(s):
+        return "\math{" + s + "}"
+    extracted_numbers = [extract_numbers(label) for label in df.index]
+    renamed_index = []
+    for numbers in extracted_numbers:
+        assert len(rename_vars) == len(numbers), f"rename_vars {rename_vars} not match with numbers {numbers}"
+        
+        # create new string
+        l = []
+        for i, num in enumerate(numbers):
+            if num == -1:
+                l.append(f"{rename_vars[i]}=\\text{{null}}")
+            else:
+                l.append(f"{rename_vars[i]}={num}")
+        renamed_index.append(
+            add_math_context(",\\ ".join(l))
+        )
+    df.index = renamed_index
+    return df
+
+
 def extract_expr(log_dir, dataset, model, peft_method, rand_seeds, expr_type = None):
     """
     Extract peft method evaluation results with all random seeds of all peft parameters (rank or adapter size) into a dictionary.
@@ -132,15 +157,21 @@ def extract_expr(log_dir, dataset, model, peft_method, rand_seeds, expr_type = N
 
             # extract potential keys
             # get the number after "r", "sz"
+            lr = f.split("_")[f.split("_").index("lr")+1]
             if "lora" in peft_method:
                 size_or_rank = f.split("_")[f.split("_").index("r")+1]
                 if expr_type == "3" and size_or_rank != "512":
                     continue
+                if expr_type == "data_size_n_methods" and (size_or_rank != "512" or lr != "1e-4"):
+                    continue
                 # if expr_type == "4":
                 #     continue
-            elif args.peft_method == "adapter" or args.peft_method == "adapter_peft":
+            elif peft_method == "adapter" or peft_method == "adapter_peft":
                 size_or_rank = f.split("_")[f.split("_").index("size")+1]
-                if expr_type == "3" and size_or_rank != "256":
+                if expr_type == "3" and size_or_rank != "512":
+                    continue
+                # if expr_type == "data_size_n_methods" and (size_or_rank != "512" or lr != "1e-4"):
+                if expr_type == "data_size_n_methods" and size_or_rank != "512":
                     continue
             elif "prompt_tuning" in peft_method:
                 size_or_rank = f.split("_")[f.split("_").index("len")+1]
@@ -169,7 +200,7 @@ def extract_expr(log_dir, dataset, model, peft_method, rand_seeds, expr_type = N
 
 
             # determine key based on expr_type
-            if expr_type in ["hp_search", "2", "3", "single", "4", "5"]:
+            if expr_type in ["hp_search", "data_size", "data_size_n_methods", "3", "single", "4", "5"]:
                 key = size_or_rank
             # elif expr_type == "hp_search":
             #     key = lr
@@ -208,20 +239,30 @@ def extract_expr(log_dir, dataset, model, peft_method, rand_seeds, expr_type = N
                             d[key][lr] = d[key].get(lr, []) + [None]
                             continue 
                         best_metric_val = train_state["state_dict"][metric_key]
+                        best_eval_val = train_state["state_dict"]["eval/rougeL"]
+                        if abs(best_metric_val - best_eval_val) > 10:
+                            print(f"test eval skipped for {last_train_state}, eval score {best_eval_val} test score {best_metric_val}")
+                            print(f"its run name is {train_state['training_args']['training_args/run_name']}")
+                            continue
                         print("metric_key: ", best_metric_val)
                         d[key][lr] = d[key].get(lr, []) + [best_metric_val]
                     else:
                         # filter non-optimal lr which are not needed for expr type other than 1
                         lr = train_state["training_args"]['training_args/run_name'].split("_")[train_state["training_args"]['training_args/run_name'].split("_").index("lr")+1]
-                        if args.peft_method == "lora_adapter" or args.peft_method == "lora_peft":
-                            if lr != args.lr:
+                        if peft_method == "lora_adapter" or peft_method == "lora_peft":
+                            if lr != "1e-4":
                                 # d[key][metric_key] = d[key].get(metric_key, []) + [None]
-                                print(f"lr {lr} not optimal for {args.peft_method}, skip results...")
+                                print(f"lr {lr} not optimal for {peft_method}, skip results...")
                                 continue
-                        if args.peft_method == "adapter" or args.peft_method == "adapter_peft":
-                            if lr != args.lr:
-                                print(f"lr {lr} not optimal for {args.peft_method}, skip results...")
+                        if peft_method == "adapter" or peft_method == "adapter_peft":
+                            if lr != "1e-4":
+                                print(f"lr {lr} not optimal for {peft_method}, skip results...")
                                 continue
+                        if peft_method == "fine_tuning":
+                            if lr != "1e-5":
+                                print(f"lr {lr} not optimal for {peft_method}, skip results...")
+                                continue
+
 
                         for metric_key in ["test/rougeL", "task", "category"]:
                             if metric_key == "test/rougeL":
@@ -336,18 +377,19 @@ def print_state_info(state_d):
     print(f" run name: {state_d['training_args']['training_args/run_name']}")
     print("--------------------\n")
 
-# python expr_analysis/expr_extract.py --expr_type 1 --peft_method fine_tuning --model google/t5-xl-lm-adapt
-# python expr_analysis/expr_extract.py --expr_type 1 --peft_method prefix_tuning --model google/t5-xl-lm-adapt
-# python expr_analysis/expr_extract.py --expr_type 2 --peft_method prompt_tuning --model google/t5-large-lm-adapt
-# python expr_analysis/expr_extract.py --expr_type 2 --peft_method adapter_peft --model google/t5-xl-lm-adapt
-# python expr_analysis/expr_extract.py --expr_type 2 --peft_method lora_peft --model google/t5-xl-lm-adapt
-# python expr_analysis/expr_extract.py --expr_type 2 --peft_method adapter --model google/t5-xl-lm-adapt
-# python expr_analysis/expr_extract.py --expr_type 2 --peft_method lora_adapter --model google/t5-xl-lm-adapt
+# python expr_analysis/expr_extract.py --expr_type hp_search --peft_method fine_tuning --model google/t5-xl-lm-adapt
+# python expr_analysis/expr_extract.py --expr_type hp_search --peft_method prefix_tuning --model google/t5-xl-lm-adapt --log_dir tmp
+# python expr_analysis/expr_extract.py --expr_type data_size --peft_method prompt_tuning --model google/t5-large-lm-adapt
+# python expr_analysis/expr_extract.py --expr_type data_size --peft_method adapter_peft --model google/t5-xl-lm-adapt
+# python expr_analysis/expr_extract.py --expr_type data_size --peft_method lora_peft --model google/t5-xl-lm-adapt
+# python expr_analysis/expr_extract.py --expr_type data_size --peft_method adapter --model google/t5-xl-lm-adapt
+# python expr_analysis/expr_extract.py --expr_type data_size --peft_method lora_adapter --model google/t5-xl-lm-adapt
 # python expr_analysis/expr_extract.py --expr_type 3 --peft_method adapter_peft --model google/t5-xxl-lm-adapt
 # python expr_analysis/expr_extract.py --expr_type 6  --peft_method prompt_tuning
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("--log_dir", type=str, default="cache/tmp")
+    arg_parser.add_argument("--log_dir", type=str, default="cache/tmp") # expr_json_only/
+    # arg_parser.add_argument("--log_dir", type=str, default="expr_json_only/")
     arg_parser.add_argument("--dataset", type=str, default="ni/default_train_707_val_50")
     arg_parser.add_argument("--model", type=str, default="google/t5-xl-lm-adapt")
     arg_parser.add_argument("--peft_method", type=str, default="lora_adapter")
@@ -358,7 +400,7 @@ if __name__ == "__main__":
     arg_parser.add_argument("--show_all", action="store_true")
     arg_parser.add_argument("--prompt_confirm", action="store_true")
     args = arg_parser.parse_args()
-    assert args.expr_type in ["single", "hp_search", "2", "3", "4", "5", "6"]
+    assert args.expr_type in ["single", "hp_search", "data_size", "data_size_n_methods", "3", "4", "5", "6"]
     search_dir = os.path.join(args.log_dir, args.dataset, args.model, args.peft_method)
     peft_methods = [args.peft_method]
     d = {}
@@ -371,12 +413,22 @@ if __name__ == "__main__":
         lrs = ("1e-5", "5e-5", "1e-4", "5e-4", "1e-3")
 
         d = extract_expr(args.log_dir, dataset, model, args.peft_method, args.random_seeds, expr_type = "hp_search")
-    elif args.expr_type == "2":
+    elif args.expr_type == "data_size":
         # dictionary structure
         # dataset -> peft method -> random seed 
         print("args.dataset is not used")
         for dataset in ["ni/default_train_707_val_50", "ni/default_train_512_val_50", "ni/default_train_256_val_50", "ni/default_train_128_val_50", "ni/default_train_64_val_50", "ni/default_train_32_val_50", "ni/default_train_8_val_50"]:
-            d[dataset] = extract_expr(args.log_dir, dataset, args.model, args.peft_method, args.random_seeds, expr_type = "2")
+            d[dataset] = extract_expr(args.log_dir, dataset, args.model, args.peft_method, args.random_seeds, expr_type = "data_size")
+    elif args.expr_type == "data_size_n_methods":
+        # dataset -> peft method (one color, one axis, with a trending line) -> random seed
+        for peft_method in ["lora_peft",  "adapter_peft", "fine_tuning"]:
+        # for peft_method in ["lora_peft"]:
+            for dataset in ["ni/default_train_707_val_50", "ni/default_train_512_val_50", "ni/default_train_256_val_50", "ni/default_train_128_val_50", "ni/default_train_64_val_50", "ni/default_train_32_val_50", "ni/default_train_8_val_50"]:
+                if dataset not in d:
+                    d[dataset] = {}
+                d[dataset][peft_method] = extract_expr(args.log_dir, dataset, args.model, peft_method, args.random_seeds, expr_type = "data_size")
+
+
     elif args.expr_type in ["3", "5"]:
         for model in [
             "google/t5-base-lm-adapt","google/t5-large-lm-adapt","google/t5-xl-lm-adapt"
@@ -413,7 +465,7 @@ if __name__ == "__main__":
 
 
     peft_setups = []
-    if args.expr_type in ["2", "3", "4", "5"]:
+    if args.expr_type in ["data_size", "3", "4", "5"]:
         
         for model_k, v in d.items():
             
@@ -431,6 +483,27 @@ if __name__ == "__main__":
                         task_rows.append({"model": model_k, "peft_k": peft_k, "cat_task_metric": cat_task_metric, "avg": avg})
                     if cat_task_metric == "test/rougeL":
                         test_rougeL_rows.append({"model": model_k, "peft_k": peft_k, "cat_task_metric": cat_task_metric, "avg": avg, "metric_vals": filtered_v3})
+    elif args.expr_type == "data_size_n_methods":
+        for dataset_k, v in d.items():
+            for method, v2 in v.items():
+                for peft_k, v3 in v2.items():
+                    for cat_task_metric, v4 in v3.items():
+                        if all(item is None for item in v3):
+                            continue
+                        filtered_v3 = [item for item in v4 if item is not None]
+                        # print(list(d[dataset_k][method][peft_k].keys()))
+                        # print(dataset_k, method, peft_k, cat_task_metric)
+                        avg = sum(filtered_v3) / len(filtered_v3)
+                        assert len(filtered_v3) <= 3, f"more than 3 random seeds for {dataset_k}, {peft_k}, {cat_task_metric}"
+                        rows.append({"method": method, "data": dataset_k, "peft_k": peft_k, "cat_task_metric": cat_task_metric, "avg": avg})
+                        if cat_task_metric in eval_category_keys:
+                            cat_rows.append({"method": method, "data": dataset_k, "peft_k": peft_k, "cat_task_metric": cat_task_metric, "avg": avg})
+                        if "task" in cat_task_metric:
+                            task_rows.append({"method": method, "data": dataset_k, "peft_k": peft_k, "cat_task_metric": cat_task_metric, "avg": avg})
+                        if cat_task_metric == "test/rougeL":
+                            test_rougeL_rows.append({"method": method, "data": dataset_k, "peft_k": peft_k, "cat_task_metric": cat_task_metric, "avg": avg, "metric_vals": filtered_v3})
+
+
                         
     elif args.expr_type == "hp_search":
         for peft_k, v in d.items(): # since it's lr search, only one xl model
@@ -491,28 +564,7 @@ if __name__ == "__main__":
             sorted_df = df[sorted_columns]
             return sorted_df
 
-        def rename_index(df, rename_vars):
-            def extract_numbers(label):
-                return [int(num) for num in re.findall(r'-?\d+', label)]
-            def add_math_context(s):
-                return "\math{" + s + "}"
-            extracted_numbers = [extract_numbers(label) for label in df.index]
-            renamed_index = []
-            for numbers in extracted_numbers:
-                assert len(rename_vars) == len(numbers), f"rename_vars {rename_vars} not match with numbers {numbers}"
-                
-                # create new string
-                l = []
-                for i, num in enumerate(numbers):
-                    if num == -1:
-                        l.append(f"{rename_vars[i]}=\\text{{null}}")
-                    else:
-                        l.append(f"{rename_vars[i]}={num}")
-                renamed_index.append(
-                    add_math_context(",\\ ".join(l))
-                )
-            df.index = renamed_index
-            return df
+        
         
 
 
@@ -545,7 +597,7 @@ if __name__ == "__main__":
         print(pivoted_test_rougeL_latex)
         print(f"writing test_rougeL df to {test_rougeL_file_name}")
         pivoted_test_rougeL_df.to_csv(test_rougeL_file_name)
-    elif args.expr_type in ["2"]:
+    elif args.expr_type in ["data_size"]:
         test_rougeL_df = pd.DataFrame(test_rougeL_rows)
         pivoted_test_rougeL_df = test_rougeL_df.pivot_table(index='model', columns=['peft_k', 'cat_task_metric'], values='avg')
         test_rougeL_file_name = os.path.join(out_dir, f"{args.peft_method}_{args.lr}_test_rougeL.csv")
@@ -632,9 +684,60 @@ if __name__ == "__main__":
             
 
             plt.legend(by_label.values(), by_label.keys())
+    elif args.expr_type == "data_size_n_methods":
+        
+
+        test_rougeL_df = pd.DataFrame(test_rougeL_rows) # reset dataframe
+        # it's data size actually
+        peft_setups = test_rougeL_df['data'].unique()
+        peft_setups = sorted(peft_setups, key=lambda x: int(x.split('_')[2]) if x != "None" else 0)
+        position_map = {setup: i for i, setup in enumerate(peft_setups, start=1)}
+        # draw method by method
+        for peft_method in ["lora_peft",  "adapter_peft", "fine_tuning"]:
+        # for peft_method in ["lora_peft"]:
+            xs = []
+            ys = []
+            x_pos = np.ones(1)
+
+            for setup in peft_setups: # data size
+                subset = test_rougeL_df[(test_rougeL_df['data'] == setup) & (test_rougeL_df['method'] == peft_method)]
+                print(setup)
+                for index, row in subset.iterrows():
+
+                    if "adapter" in peft_method and row['peft_k'] != "256":
+                        continue
+                    if "lora" in peft_method and row['peft_k'] != "512":
+                        continue
+                    xs.append(x_pos.copy())
+                    ys.append(row['avg'])
+                    # print(row)
+                    
+                    # print(row['avg'])
+                    # size = len(row['avg']) if type(row['avg']) == list else 1
+                    # plt.plot( x_pos[:size], row['avg'], color=color, label=f"{convert(row['data'])} {convert(row['peft_k'])}")
+                    x_pos += 1
+            print(xs, ys)
+            if "lora" in peft_method:
+                original_name = "LoRA"
+                color = "r"
+            elif "adapter" in peft_method:
+                original_name = "Adapter"
+                color = "g"
+            elif "fine_tuning" in peft_method:
+                original_name = "Finetuning"
+                color = "b"
+
+            plt.plot(xs, ys, marker= "o", linestyle='-', color = color, label = original_name)
+        plt.xticks(list(position_map.values()), [convert(item) for item in list(peft_setups)])
+        plt.xlabel('Data Size')
+        plt.ylabel('RougeL Score')
+        plt.legend()
 
 
-    elif args.expr_type in ["2", "3", "5"]: # only 2 and 3 have plots
+        handles, labels = plt.gca().get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+
+    elif args.expr_type in ["data_size", "3", "5"]: # only 2 and 3 have plots
         if args.plot_interest == "peft_k":
             x_pos = np.zeros(3)
             jitter_values = [-0.1, 0, 0.1]
@@ -676,7 +779,7 @@ if __name__ == "__main__":
                 subset = test_rougeL_df[test_rougeL_df['model'] == setup]
                 
                 for index, row in subset.iterrows():
-                    if (args.peft_method == "adapter" or args.peft_method == "adapter_peft") and row['peft_k'] != "256":
+                    if (args.peft_method == "adapter" or args.peft_method == "adapter_peft") and row['peft_k'] != "512":
                         continue
                     if "lora" in args.peft_method and row['peft_k'] != "512":
                         continue
@@ -695,7 +798,7 @@ if __name__ == "__main__":
             # plt.legend(by_label.values(), by_label.keys())
 
         elif args.plot_interest == "data_size_n_peft_k":
-            assert args.expr_type  == "2", "only expr_type 3 has model size and peft k plot"
+            assert args.expr_type  == "data_size", "only expr_type 3 has model size and peft k plot"
             pivoted_test_rougeL_df = test_rougeL_df.pivot_table(index='peft_k', columns=['model', 'cat_task_metric'], values='avg')
             x_pos = 0
 
