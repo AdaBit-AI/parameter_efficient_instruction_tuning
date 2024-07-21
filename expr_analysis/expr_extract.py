@@ -160,7 +160,7 @@ def extract_expr(log_dir, dataset, model, peft_method, rand_seeds, expr_type = N
             lr = f.split("_")[f.split("_").index("lr")+1]
             if "lora" in peft_method:
                 size_or_rank = f.split("_")[f.split("_").index("r")+1]
-                if expr_type == "3" and size_or_rank != "512":
+                if expr_type == "model_size" and size_or_rank != "512":
                     continue
                 if expr_type == "data_size_n_methods" and (size_or_rank != "512" or lr != "1e-4"):
                     continue
@@ -168,7 +168,7 @@ def extract_expr(log_dir, dataset, model, peft_method, rand_seeds, expr_type = N
                 #     continue
             elif peft_method == "adapter" or peft_method == "adapter_peft":
                 size_or_rank = f.split("_")[f.split("_").index("size")+1]
-                if expr_type == "3" and size_or_rank != "512":
+                if expr_type == "model_size" and size_or_rank != "512":
                     continue
                 # if expr_type == "data_size_n_methods" and (size_or_rank != "512" or lr != "1e-4"):
                 if expr_type == "data_size_n_methods" and size_or_rank != "512":
@@ -200,7 +200,7 @@ def extract_expr(log_dir, dataset, model, peft_method, rand_seeds, expr_type = N
 
 
             # determine key based on expr_type
-            if expr_type in ["hp_search", "data_size", "data_size_n_methods", "3", "single", "4", "5"]:
+            if expr_type in ["hp_search", "data_size", "data_size_n_methods", "model_size", "single", "4", "5"]:
                 key = size_or_rank
             # elif expr_type == "hp_search":
             #     key = lr
@@ -400,7 +400,7 @@ if __name__ == "__main__":
     arg_parser.add_argument("--show_all", action="store_true")
     arg_parser.add_argument("--prompt_confirm", action="store_true")
     args = arg_parser.parse_args()
-    assert args.expr_type in ["single", "hp_search", "data_size", "data_size_n_methods", "3", "4", "5", "6"]
+    assert args.expr_type in ["single", "hp_search", "data_size", "data_size_n_methods", "model_size", "4", "5", "6"]
     search_dir = os.path.join(args.log_dir, args.dataset, args.model, args.peft_method)
     peft_methods = [args.peft_method]
     d = {}
@@ -429,9 +429,9 @@ if __name__ == "__main__":
                 d[dataset][peft_method] = extract_expr(args.log_dir, dataset, args.model, peft_method, args.random_seeds, expr_type = "data_size")
 
 
-    elif args.expr_type in ["3", "5"]:
+    elif args.expr_type in ["model_size", "5"]:
         for model in [
-            "google/t5-base-lm-adapt","google/t5-large-lm-adapt","google/t5-xl-lm-adapt"
+            "google/t5-base-lm-adapt","google/t5-large-lm-adapt","google/t5-xl-lm-adapt", "google/t5-xxl-lm-adapt"
         ]:
             print('args.model is not used')
             d[model] = extract_expr(args.log_dir, args.dataset, model, args.peft_method, args.random_seeds, expr_type = args.expr_type )
@@ -465,7 +465,7 @@ if __name__ == "__main__":
 
 
     peft_setups = []
-    if args.expr_type in ["data_size", "3", "4", "5"]:
+    if args.expr_type in ["data_size", "model_size", "4", "5"]:
         
         for model_k, v in d.items():
             
@@ -605,7 +605,7 @@ if __name__ == "__main__":
         print(f"writing test_rougeL df to {test_rougeL_file_name}")
         pivoted_test_rougeL_df.to_csv(test_rougeL_file_name)
 
-    elif args.expr_type in ["3", "5"]: # model centric
+    elif args.expr_type in ["model_size", "5"]: # model centric
         # convert to data frame and save as csv
         task_df = pd.DataFrame(task_rows)
         task_df = task_df.pivot_table(index='model', columns=['peft_k', 'cat_task_metric'], values='avg')
@@ -737,7 +737,7 @@ if __name__ == "__main__":
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
 
-    elif args.expr_type in ["data_size", "3", "5"]: # only 2 and 3 have plots
+    elif args.expr_type in ["data_size", "model_size", "5"]: # only 2 and 3 have plots
         if args.plot_interest == "peft_k":
             x_pos = np.zeros(3)
             jitter_values = [-0.1, 0, 0.1]
@@ -824,7 +824,7 @@ if __name__ == "__main__":
             by_label = dict(zip(labels, handles))
             plt.legend(by_label.values(), by_label.keys())
         elif args.plot_interest == "model_size":
-            assert args.expr_type  == "3", "only expr_type 3 has model size plot"
+            assert args.expr_type  == "model_size", "only expr_type 3 has model size plot"
             x_pos = np.zeros(3)
 
             test_rougeL_df = pd.DataFrame(test_rougeL_rows) # reset dataframe
