@@ -1,5 +1,5 @@
 ## Parameter efficient instruction tuning: an Empirical Study
-This repository serves as an effort to systematically to compare different parameter efficient fine-tuning methods on instruction tuning task. We use the [NI dataset](https://github.com/allenai/natural-instructions) as the benchmark dataset.
+This repository serves as an effort to systematically to compare different parameter efficient fine-tuning methods on instruction tuning task. We use the [NI dataset](https://github.com/allenai/natural-instructions) as the benchmark dataset. The technical report can be found [here](https://arxiv.org/pdf/2411.16775)
 
 PEFT method implementations are adapted from [adapter-transformers](https://github.com/Adapter-Hub/adapter-transformers) and [peft](https://github.com/huggingface/peft).
 
