@@ -42,3 +42,18 @@ This codebase is highly optimized for hfai platform, and it supports the followi
 Here are some extra notes for hfai platform:
 * default ni dataset dir is `../../data` due to hfai compatibility.
 * **Pytorch and CUDA compatibility**: hfai platform has CUDA version 11.3, and [peft](https://github.com/huggingface/peft) setup requires `torch>=1.13.0`. Therefore, we use the corresponding pytorch version `1.10.2+cu113` by peft setup.
+
+
+## Citation
+If you found the codebase or my work valuable, please cite:
+```
+@misc{he2024parameterefficientinstructiontuning,
+      title={Parameter Efficient Instruction Tuning: An Empirical Study}, 
+      author={Pengfei He},
+      year={2024},
+      eprint={2411.16775},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2411.16775}, 
+}
+```
